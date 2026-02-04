@@ -169,7 +169,7 @@ library(emmeans)
 # 1. Load Data
 df <- read.csv("Insect_Nutrition_Prelim.csv", check.names = FALSE)
 
-# 2. Data Cleaning & Label Formatting
+# 2. Data Cleaning & Group Creation
 df_clean <- df %>%
   select(Order, Family, Month, Quantity, Size, Insect_Weight, Dry_Weight, Lipid_Free_Weight) %>%
   filter(!is.na(Family), !is.na(Month), !is.na(Insect_Weight), 
@@ -178,12 +178,9 @@ df_clean <- df %>%
     # Fix typos
     Order = ifelse(Order == "Lepedoptera", "Lepidoptera", Order),
     
-    # FORMATTING LOGIC: 
-    # If Size is missing/empty, just use Family name. 
-    # Otherwise, use "Family (Size)".
-    Taxon_Group = ifelse(Size == "" | is.na(Size), 
-                         Family, 
-                         paste0(Family, " (", Size, ")")),
+    # Create the label: "Family" or "Family (Size)"
+    Size_Label = ifelse(Size == "" | is.na(Size), Family, paste0(Family, " (", Size, ")")),
+    Taxon_Group = Size_Label,
     
     # Metric 1: Individual Biomass
     Biomass_Ind = Insect_Weight / Quantity,
@@ -192,42 +189,50 @@ df_clean <- df %>%
     Lipid_Mass = Dry_Weight - Lipid_Free_Weight,
     Lipid_Wet_Pct = Lipid_Mass / Insect_Weight
   ) %>%
-  # Filter valid data
   filter(Biomass_Ind > 0, Lipid_Wet_Pct >= 0, Lipid_Wet_Pct <= 1)
 
 # 3. Run Statistical Models
-# Model A: Biomass
-model_bio <- lm(Biomass_Ind ~ Taxon_Group + Month, 
-                data = df_clean, weights = Quantity)
+# We include Month to control for season
+model_bio <- lm(Biomass_Ind ~ Taxon_Group + Month, data = df_clean, weights = Quantity)
+model_lipid <- lm(Lipid_Wet_Pct ~ Taxon_Group + Month, data = df_clean, weights = Quantity)
 
-# Model B: Lipid Content
-model_lipid <- lm(Lipid_Wet_Pct ~ Taxon_Group + Month, 
-                  data = df_clean, weights = Quantity)
+# ---------------------------------------------------------
+# 4. PRINT ANOVA RESULTS
+# ---------------------------------------------------------
+print("--- ANOVA: Individual Biomass (Size) ---")
+print(anova(model_bio))
 
-# 4. Extract Results for Plotting
-# Get means for Biomass
+print("--- ANOVA: Lipid Content (Wet %) ---")
+print(anova(model_lipid))
+
+# ---------------------------------------------------------
+# 5. VISUALIZATION
+# ---------------------------------------------------------
+
+# Extract Estimated Means
 emm_bio <- emmeans(model_bio, ~ Taxon_Group)
 df_bio <- as.data.frame(emm_bio) %>% 
   mutate(Metric = "Individual Mass (g)") %>%
   rename(Value = emmean)
 
-# Get means for Lipid
-emm_lipid <- ehttp://127.0.0.1:13796/graphics/plot_zoom_png?width=1872&height=940mmeans(model_lipid, ~ Taxon_Group)
+emm_lipid <- emmeans(model_lipid, ~ Taxon_Group)
 df_lipid <- as.data.frame(emm_lipid) %>% 
   mutate(Metric = "Lipid Content (Wet %)") %>%
   rename(Value = emmean)
 
-# Combine and add Order info
-plot_data <- bind_rows(df_bio, df_lipid) %>%
+# Combine and Add Order Info for Grouping
+all_data <- bind_rows(df_bio, df_lipid) %>%
   left_join(unique(df_clean[, c("Taxon_Group", "Order")]), by = "Taxon_Group")
 
-# 5. Create the Visualization
-ggplot(plot_data, aes(x = Taxon_Group, y = Value, color = Order)) +
+# Create the Plot
+ggplot(all_data, aes(x = Taxon_Group, y = Value, color = Order)) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.3) +
   
-  # Facet Grid: Rows=Order, Columns=Metric
-  # scales="free" ensures the mass (0.01g) and lipid (10%) axis don't squash each other
+  # LAYOUT:
+  # Order ~ Metric : Rows = Order (to group families), Columns = Metric
+  # scales = "free" : Allows Mass and Lipid axes to be independent
+  # space = "free_y" : Makes the panels bigger/smaller based on how many families are in that Order
   facet_grid(Order ~ Metric, scales = "free", space = "free_y") +
   
   coord_flip() +
@@ -237,4 +242,5 @@ ggplot(plot_data, aes(x = Taxon_Group, y = Value, color = Order)) +
        subtitle = "Controlled for Month and Quantity",
        x = "", y = "Estimated Mean Value") +
   theme(strip.text = element_text(face = "bold"),
-        legend.position = "none") # Hide legend as Order is in the facet labels
+        legend.position = "none")
+
