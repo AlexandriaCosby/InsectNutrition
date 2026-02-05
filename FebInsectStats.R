@@ -623,8 +623,8 @@ plot_lifespan_means <- ggplot(df_family_means, aes(x = Avg_Lifespan_Days, y = Me
                   show.legend = FALSE) +
   
   # E. Scales
-  scale_x_log10() + 
-  
+  scale_y_log10() + 
+  scale_x_log10()+
   # F. Formatting
   theme_bw() +
   labs(
@@ -645,6 +645,113 @@ print(plot_lifespan_means)
 
 # 3. STAT CHECK (Run the regression on these MEANS)
 # Does the trend hold up when we treat the Family as the unit of analysis?
-mod_means <- lm(Mean_Lipid ~ Avg_Lifespan_Days, data = df_family_means)
+mod_means <- lm(log(Mean_Lipid) ~ log(Avg_Lifespan_Days), data = df_family_means)
 print("=== REGRESSION RESULTS (FAMILY MEANS) ===")
 summary(mod_means)
+
+
+install.packages("pwr")
+library(pwr)
+
+# 1. INPUT THE VALUES FROM YOUR MODEL SUMMARY
+r_squared <-  0.049
+
+# 2. CALCULATE EFFECT SIZE (Cohen's f2)
+f2_value <- r_squared / (1 - r_squared)
+
+print(paste("Observed Effect Size (f2):", round(f2_value, 5)))
+
+# 3. RUN THE POWER TEST
+power_result <- pwr.f2.test(u = 1, 
+                            f2 = f2_value, 
+                            sig.level = 0.05, 
+                            power = 0.80)
+
+print("=== SAMPLES NEEDED ===")
+print(power_result)
+
+# 4. CALCULATE TOTAL N
+total_n <- round(power_result$v + 1 + 1)
+print(paste("Total Samples Required:", total_n))
+
+#add mouth part
+library(tidyverse)
+
+# 1. CREATE THE MOUTH LOOKUP TABLE
+# Transcribed exactly from your updated image (image_2dfeff.png)
+mouth_data <- tribble(
+  ~Family,          ~Mouth_Type,
+  "Geometridae",    "yes",
+  "Crambidae",      "yes",
+  "Noctuidae",      "yes",
+  "Lasiocampidae",  "no",
+  "Nematocera",     "mixed",
+  "Carabidae",      "yes",
+  "Brachycera",     "yes",
+  "Leptoceridae",   "yes",
+  "Notodontidae",   "no",
+  "Elateridae",     "yes",
+  "Erebidae",       "mixed",
+  "Pyralidae",      "yes",
+  "Microlep",       "yes",
+  "Gelechiidae",    "yes",
+  "Caenidae",       "no",
+  "Hydroptilidae",  "yes",
+  "Limnephilidae",  "yes",
+  "Heptageniidae",  "no",
+  "Ephemeridae",    "no",
+  "Cosmopterigidae","yes",
+  "Heteroceridae",  "yes",
+  "Staphylinidae",  "yes",
+  "Tortricidae",    "yes",
+  "Silphidae",      "yes",
+  "Phryganeidae",   "no"
+)
+
+# 2. STANDARDIZE THE LABELS
+# We map the raw "yes/no/mixed" to scientific terms.
+mouth_data <- mouth_data %>%
+  mutate(
+    Feeding_Strategy = case_when(
+      Mouth_Type == "no"    ~ "Capital (Non-Feeding)",
+      Mouth_Type == "yes"   ~ "Income (Feeding)",
+      Mouth_Type == "mixed" ~ "Mixed/Variable",
+      TRUE ~ "Unknown"
+    )
+  )
+
+# 3. MERGE WITH YOUR MAIN DATA
+# We overwrite df_clean with the new version containing the 'Feeding_Strategy' column
+df_clean <- df_clean %>%
+  # Remove the old Feeding_Strategy column if it exists to avoid duplicates
+  select(-any_of(c("Mouth_Type", "Feeding_Strategy"))) %>%
+  left_join(mouth_data, by = "Family")
+
+# Check for any families that didn't match (returns 0 rows if perfect)
+print("=== FAMILIES MISSING MOUTH DATA ===")
+print(df_clean %>% filter(is.na(Feeding_Strategy)) %>% distinct(Family))
+
+# 4. RUN THE STATISTICAL TEST
+# Does this biological trait predict fat content better than random chance?
+mod_mouth <- lm(Log_Lipid_Rel ~ Feeding_Strategy +Taxon_Group, data = df_clean)
+
+print("=== ANOVA: FEEDING STRATEGY VS. FAT CONTENT ===")
+print(anova(mod_mouth))
+
+# 5. VISUALIZE THE RESULTS
+ggplot(df_clean %>% filter(!is.na(Feeding_Strategy)), 
+       aes(x = Feeding_Strategy, y = Lipid_Rel_Pct, fill = Feeding_Strategy)) +
+  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.4) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("Capital (Non-Feeding)" = "#E69F00", 
+                               "Income (Feeding)" = "#56B4E9",
+                               "Mixed/Variable" = "grey70")) +
+  theme_bw() +
+  labs(
+    title = "Does having a mouth predict fat content?",
+    subtitle = "Comparison of Capital vs. Income vs. Mixed strategies",
+    x = "Feeding Strategy",
+    y = "Relative Lipid Content (%)"
+  ) +
+  theme(legend.position = "none")
