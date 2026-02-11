@@ -5,9 +5,10 @@ library(tidyverse)
 library(ggpubr)
 library(emmeans)
 library(ggrepel)
+library(ggplot2)
 
 # Load Data
-df <- read.csv("Insect_Nutrition_Prelim.csv", check.names = FALSE)
+df <- read.csv("FebInsectNutrition.csv", check.names = FALSE)
 
 # =========================================================
 # 2. DATA CALCULATION -> Accounting for multiple individuals per sample
@@ -35,7 +36,7 @@ df_clean <- df %>%
     # --- LOG TRANSFORMATIONS (FOR ALL 3) ---
     Log_Mass = log(Mass_Ind),
     Log_Lipid_Total = log(Lipid_Total),
-    Log_Lipid_Rel = log(Lipid_Rel_Pct)
+    Logit_Lipid_Rel = log(Lipid_Rel_Pct)
   )
 
 # =========================================================
@@ -78,17 +79,99 @@ print(paste("Log Data p:", format(shapiro.test(df_clean$Log_Lipid_Total)$p.value
 # C. Relative Lipid Content
 print("--- 3. Relative Lipid Content ---")
 print(paste("Raw Data p:", format(shapiro.test(df_clean$Lipid_Rel_Pct)$p.value, digits=3)))
-print(paste("Log Data p:", format(shapiro.test(df_clean$Log_Lipid_Rel)$p.value, digits=3)))
+print(paste("Log Data p:", format(shapiro.test(df_clean$Logit_Lipid_Rel)$p.value, digits=3)))
 
-##Confirms that log transform makes data normal 
+##log didn't help, inspecting with qq
+# Set up a 3x2 grid to view all plots at once
+par(mfrow=c(3,2))
+
+# --- 1. INDIVIDUAL MASS ---
+# Raw
+qqnorm(df_clean$Mass_Ind, main="Q-Q Plot: Raw Mass")
+qqline(df_clean$Mass_Ind, col="red", lwd=2)
+
+# Log
+qqnorm(df_clean$Log_Mass, main="Q-Q Plot: Log Mass")
+qqline(df_clean$Log_Mass, col="red", lwd=2)
+
+# --- 2. TOTAL LIPID CONTENT ---
+# Raw
+qqnorm(df_clean$Lipid_Total, main="Q-Q Plot: Raw Total Lipid")
+qqline(df_clean$Lipid_Total, col="red", lwd=2)
+
+# Log
+qqnorm(df_clean$Log_Lipid_Total, main="Q-Q Plot: Log Total Lipid")
+qqline(df_clean$Log_Lipid_Total, col="red", lwd=2)
+
+# --- 3. RELATIVE LIPID CONTENT ---
+# Raw
+qqnorm(df_clean$Lipid_Rel_Pct, main="Q-Q Plot: Raw Relative Lipid")
+qqline(df_clean$Lipid_Rel_Pct, col="red", lwd=2)
+
+# Log
+qqnorm(df_clean$Logit_Lipid_Rel, main="Q-Q Plot: Log Relative Lipid")
+qqline(df_clean$Logit_Lipid_Rel, col="red", lwd=2)
+
+# Reset plot layout to default
+par(mfrow=c(1,1))
+
+###Relative lipid might beneift from logit, or could leave?
+
+# Option B: Logit Transformation
+# We add a tiny constant (0.01) to avoid infinite values if you have exact 0% or 100%
+df_clean$Logit_Lipid_Rel <- log((df_clean$Lipid_Rel_Pct / 100 + 0.001) / (1 - (df_clean$Lipid_Rel_Pct / 100) + 0.001))
+
+# 2. Run Shapiro-Wilk Tests
+print("--- Shapiro-Wilk Results ---")
+print(paste("Logit p:  ", format(shapiro.test(df_clean$Logit_Lipid_Rel)$p.value, digits=3)))
+
+# Plot B: Logit
+qqnorm(df_clean$Logit_Lipid_Rel, main="Q-Q Plot: Logit Transformed")
+qqline(df_clean$Logit_Lipid_Rel, col="blue", lwd=2)
+
+
+# =========================================================
+# ADD Mouth column
+# =========================================================
+# 1. CREATE THE MOUTH LOOKUP TABLE
+# Transcribed exactly from your updated image (image_2dfeff.png)
+mouth_data <- tribble(
+  ~Family,          ~Mouth_Type,
+  "Geometridae",    "yes",
+  "Crambidae",      "yes",
+  "Noctuidae",      "yes",
+  "Lasiocampidae",  "no",
+  "Nematocera",     "yes",
+  "Carabidae",      "yes",
+  "Brachycera",     "yes",
+  "Leptoceridae",   "yes",
+  "Notodontidae",   "no",
+  "Elateridae",     "yes",
+  "Erebidae",       "mixed",
+  "Pyralidae",      "yes",
+  "Microlep",       "yes",
+  "Gelechiidae",    "yes",
+  "Caenidae",       "no",
+  "Hydroptilidae",  "yes",
+  "Limnephilidae",  "yes",
+  "Heptageniidae",  "no",
+  "Ephemeridae",    "no",
+  "Cosmopterigidae","yes",
+  "Heteroceridae",  "yes",
+  "Staphylinidae",  "yes",
+  "Tortricidae",    "yes",
+  "Silphidae",      "yes",
+  "Phryganeidae",   "no",
+  "Helicopsychidae", "yes",
+)
 
 # =========================================================
 # 4. TWO-WAY ANOVA (Order + Month)
 # =========================================================
 # --- Order Level Models ---
-mod_ord_mass  <- lm(Log_Mass ~ Order + Month, data = df_clean)
-mod_ord_total <- lm(Log_Lipid_Total ~ Order + Month, data = df_clean)
-mod_ord_rel   <- lm(Log_Lipid_Rel ~ Order + Month, data = df_clean)
+mod_ord_mass  <- lm(Log_Mass ~ Order + Mouth_Type + Month, data = df_clean)
+mod_ord_total <- lm(Log_Lipid_Total ~ Order + Mouth_Type + Month, data = df_clean)
+mod_ord_rel   <- lm(Logit_Lipid_Rel ~ Order + Mouth_Type + Month, data = df_clean)
 
 # Print Results
 print("=== ANOVA RESULTS (Two-Way: Taxonomy + Month) ===")
@@ -120,19 +203,35 @@ print(paste("Valid Families (N>=2):", length(valid_groups)))
 
 # --- C. Family Level Models (Run on FILTERED Data) ---
 # Note: We name these '_valid' so they match your post-hoc code later
-mod_fam_mass_valid  <- lm(Log_Mass ~ Life_Hisotry + Taxon_Group + Month, data = df_fam_valid)
-mod_fam_total_valid <- lm(Log_Lipid_Total ~ Life_History + Taxon_Group + Month, data = df_fam_valid)
-mod_fam_rel_valid   <- lm(Log_Lipid_Rel ~ Life_History + Taxon_Group + Month, data = df_fam_valid)
+mod_fam_mass_valid  <- lm(Log_Mass ~  Mouth_Type + Taxon_Group + Month, data = df_fam_valid)
+mod_fam_total_valid <- lm(Log_Lipid_Total ~ Mouth_Type + Taxon_Group + Month, data = df_fam_valid)
+mod_fam_rel_valid   <- lm(Logit_Lipid_Rel ~ Mouth_Type + Taxon_Group + Month, data = df_fam_valid)
 
 print("=== ANOVA RESULTS (Family Level: Valid N > 1) ===")
 print("--- 2. Family Level ---")
 print(anova(mod_fam_mass_valid))
 print(anova(mod_fam_total_valid))
 print(anova(mod_fam_rel_valid))
+summary(mod_fam_mass_valid)
 
 # =========================================================
 # 5. SCIENTIFIC PLOTTING (Boxplots)
 # =========================================================
+
+# We use the RAW data for the axes, but apply 'scale_y_log10'
+
+create_boxplot <- function(data, x_var, y_var, fill_var, title_text, y_label) {
+  ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]], color = .data[[fill_var]])) +
+    geom_boxplot(outlier.shape = NA, width = 0.6) +
+    geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+    coord_flip() +
+    scale_y_log10() + 
+    theme_bw() +
+    theme(legend.position = "none",
+          axis.text.y = element_text(face = "bold")) +
+    labs(title = title_text, y = y_label, x = "")
+}
+
 # 1. Mass (Size)
 p_ord_mass <- create_boxplot_clean(
   data = df_clean, 
@@ -172,15 +271,15 @@ print(p_ord_total)
 print(p_ord_rel)
 
 # --- Family Level Plots Unordered, better for comparisions between groups---
-p_fam_mass <- create_boxplot(df_clean, "Taxon_Group", "Mass_Ind", "Order", 
+p_fam_mass <- create_boxplot(df_clean, "Sample_ID", "Mass_Ind", "Order", 
                              "Family: Individual Size", "Mass (g) - Log Scale") + 
   facet_grid(Order ~ ., scales = "free_y", space = "free_y")
 
-p_fam_total <- create_boxplot(df_clean, "Taxon_Group", "Lipid_Total", "Order", 
+p_fam_total <- create_boxplot(df_clean, "Sample_ID", "Lipid_Total", "Order", 
                               "Family: Total Lipid Content", "Total Lipid (g) - Log Scale") + 
   facet_grid(Order ~ ., scales = "free_y", space = "free_y")
 
-p_fam_rel <- create_boxplot(df_clean, "Taxon_Group", "Lipid_Rel_Pct", "Order", 
+p_fam_rel <- create_boxplot(df_clean, "Sample_ID", "Lipid_Rel_Pct", "Order", 
                             "Family: Relative Lipid Content", "Relative Lipid (Proportion) - Log Scale") + 
   facet_grid(Order ~ ., scales = "free_y", space = "free_y")
 
@@ -329,7 +428,7 @@ create_boxplot_clean <- function(data, x_var, y_var, fill_var, title_text, y_lab
 # Removing the life_history so we can visual straight forward comparisons 
 mod_fam_mass_valid1  <- lm(Log_Mass ~ Taxon_Group + Month, data = df_fam_valid)
 mod_fam_total_valid1 <- lm(Log_Lipid_Total ~  Taxon_Group + Month, data = df_fam_valid)
-mod_fam_rel_valid1   <- lm(Log_Lipid_Rel ~ Taxon_Group + Month, data = df_fam_valid)
+mod_fam_rel_valid1   <- lm(Logit_Lipid_Rel ~ Taxon_Group + Month, data = df_fam_valid)
 
 # Function to create a clean Significance Heatmap
 create_significance_heatmap <- function(model, factor_name, title_text) {
@@ -376,7 +475,7 @@ print(p_matrix_rel)
 # Biplot
 # =========================================================
 
-# 1. PREPARE THE DATA (Now including Life_History!)
+# 1. PREPARE THE DATA 
 df_tradeoff <- df_clean %>%
   # Add Life_History to the grouping so it stays in the summary
   group_by(Order, Taxon_Group, Life_History) %>%
@@ -394,12 +493,7 @@ plot_tradeoff_circles <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality
   # A. The Grouping Circles (Ellipses)
   # We use 'stat_ellipse' to draw a circle around the Life History groups
   # alpha = 0.1 makes the fill very faint so it doesn't hide the points
-  stat_ellipse(aes(group = Life_History, fill = Life_History), 
-               geom = "polygon", alpha = 0.1, show.legend = TRUE) +
-  
-  # A2. Optional: Dashed lines around the circles to make them pop
-  stat_ellipse(aes(group = Life_History, linetype = Life_History), 
-               geom = "path", color = "grey40", alpha = 0.6) +
+
   
   # B. The Points
   geom_point(size = 4, alpha = 0.9) +
@@ -413,8 +507,6 @@ plot_tradeoff_circles <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality
   
   # D. Scales & Colors
   scale_x_log10() + 
-  # We need to manually set fill colors for the ellipses (Fast vs Slow)
-  scale_fill_manual(values = c("Fast" = "blue", "Slow" = "red", "Other" = "grey")) +
   
   # E. Reference Line
   geom_hline(yintercept = mean(df_clean$Lipid_Rel_Pct, na.rm=TRUE), 
@@ -424,7 +516,6 @@ plot_tradeoff_circles <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality
   theme_bw() +
   labs(
     title = "The Trade-off: Quantity vs. Quality (Grouped by Life History)",
-    subtitle = "Ellipses show the clustering of Fast vs. Slow life histories.",
     x = "Quantity: Individual Mass (g) [Log Scale]",
     y = "Quality: Relative Lipid Content (Proportion)",
     fill = "Life History",
@@ -439,240 +530,86 @@ plot_tradeoff_circles <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality
 # Print
 print(plot_tradeoff_circles)
 
-# =========================================================
-# ADD LIFESPAN DATA (Using 'Family' Column Only)
-# =========================================================
+#####Size driver
 
-df_clean <- df_clean %>%
-  mutate(
-    Avg_Lifespan_Days = case_when(
-      
-      # --- FLIES (Diptera) ---
-      # Now looking directly for these names in the Family column
-      Family == "Brachycera" ~ 21,
-      Family == "Nematocera " ~ 14,
-      Family %in% c("Muscidae", "Drosophilidae") ~ 21, 
-      Family %in% c("Tipulidae", "Chironomidae", "Culicidae") ~ 14,
-      
-      # --- MOTHS (Lepidoptera) ---
-      Family == "Pyralidae" ~ 30,
-      Family == "Noctuidae" ~ 21,
-      Family %in% c("Tortricidae", "Erebidae") ~ 15,
-      Family %in% c("Crambidae", "Gelechiidae", "Cosmopterigidae") ~ 14,
-      Family == "Microlep" ~ 14, 
-      Family %in% c("Geometridae", "Lasiocampidae", "Notodontidae") ~ 7,
-      
-      # --- BEETLES (Coleoptera) ---
-      Family %in% c("Carabidae", "Silphidae") ~ 365,
-      Family %in% c("Staphylinidae", "Elateridae") ~ 40,
-      Family == "Heteroceridae" ~ 30,
-      
-      # --- AQUATIC INSECTS ---
-      Family == "Limnephilidae" ~ 60,
-      Family %in% c("Leptoceridae", "Phryganeidae") ~ 30,
-      Family == "Hydroptilidae" ~ 14,
-      Family %in% c("Ephemeridae", "Heptageniidae") ~ 2,
-      Family == "Caenidae" ~ 0.5,
-      
-      # --- DEFAULT ---
-      TRUE ~ NA_real_
-    )
-  )
+# 1. RUN THE LINEAR MODEL
+# We use the Log-Log version because biological scaling is almost always power-law.
+mod_allometry <- lm(Log_Lipid_Total ~ Log_Mass, data = df_clean)
 
-# Verify results
-print(head(df_clean %>% select(Family, Avg_Lifespan_Days)))
+print("=== MODEL SUMMARY: DOES SIZE PREDICT FAT? ===")
+summary(mod_allometry)
 
-# =========================================================
-# 2. RUN THE COMBINED MODELS
-# =========================================================
-
-# Model A: Size (Mass)
-mod_test_mass <- lm(Log_Mass ~ Avg_Lifespan_Days + Taxon_Group + Month, data = df_fam_valid)
-
-# Model B: Nutritional Quality (% Lipid)
-mod_test_rel <- lm(Log_Lipid_Rel ~ Avg_Lifespan_Days + Taxon_Group + Month, data = df_fam_valid)
-
-# =========================================================
-# 3. ANOVA RESULTS (Type I Sum of Squares)
-# =========================================================
-print("=== ANOVA: MASS (Size) ===")
-print(anova(mod_test_mass))
-
-print("=== ANOVA: QUALITY (Relative Lipid) ===")
-print(anova(mod_test_rel))
-
-# 1. PREPARE THE DATA & CREATE BINS
-df_tradeoff_days <- df_clean %>%
-  # Filter out rows with missing lifespan data
-  filter(!is.na(Avg_Lifespan_Days)) %>%
+# 2. VISUALIZE THE RELATIONSHIP
+ggplot(df_clean, aes(x = Log_Mass, y = Log_Lipid_Total)) +
   
-  # Create Logical Bins for the Ellipses
-  mutate(Lifespan_Bin = case_when(
-    Avg_Lifespan_Days <= 7  ~ "Ephemeral (< 1 Wk)",
-    Avg_Lifespan_Days <= 60 ~ "Seasonal (1-8 Wks)",
-    Avg_Lifespan_Days > 60  ~ "Perennial (> 2 Mos)"
-  )) %>%
+  # A. The Points (Colored by Order to see if groups differ)
+  geom_point(aes(color = Order), alpha = 0.6, size = 2) +
   
-  # Force the order of the bins for the legend
-  mutate(Lifespan_Bin = factor(Lifespan_Bin, 
-                               levels = c("Ephemeral (< 1 Wk)", "Seasonal (1-8 Wks)", "Perennial (> 2 Mos)"))) %>%
+  # B. The Regression Line (The "Slope")
+  geom_smooth(method = "lm", color = "black", linetype = "dashed") +
   
-  # Group and Summarize
-  group_by(Order, Family, Lifespan_Bin) %>%
-  summarise(
-    Mean_Mass = mean(Mass_Ind, na.rm = TRUE),
-    Mean_Quality = mean(Lipid_Rel_Pct, na.rm = TRUE),
-    Count = n(),
-    .groups = "drop"
-  ) %>%
-  filter(Count >= 2)
-
-# 2. GENERATE THE PLOT (With Log-Transformed Y-Axis)
-plot_tradeoff_days <- ggplot(df_tradeoff_days, aes(x = Mean_Mass, y = Mean_Quality)) +
+  # C. Identity Line (Slope = 1) for comparison
+  # If the black dashed line is steeper than this gray line, big bugs are "fatter."
+  geom_abline(slope = 1, intercept = coef(mod_allometry)[1], color = "grey", linetype = "dotted") +
   
-  # A. The Grouping Circles (Ellipses)
-  stat_ellipse(aes(fill = Lifespan_Bin, color = Lifespan_Bin), 
-               geom = "polygon", alpha = 0.1, show.legend = TRUE) +
-  
-  # B. The Points 
-  geom_point(aes(color = Lifespan_Bin), size = 4, alpha = 0.8) +
-  
-  # C. The Labels (Family Names)
-  geom_text_repel(aes(label = Family), 
-                  size = 3, 
-                  box.padding = 0.5, 
-                  max.overlaps = 30,
-                  show.legend = FALSE) +
-  
-  # D. SCALES (Both Axes are now Log-10)
-  scale_x_log10() + 
-  scale_y_log10() +  # <--- THIS WAS THE MISSING PIECE
-  
-  # E. Colors (Blue -> Yellow -> Red)
-  scale_fill_manual(values = c("Ephemeral (< 1 Wk)" = "#3498db", 
-                               "Seasonal (1-8 Wks)" = "#f1c40f", 
-                               "Perennial (> 2 Mos)" = "#e74c3c"),
-                    name = "Adult Lifespan") +
-  
-  scale_color_manual(values = c("Ephemeral (< 1 Wk)" = "#3498db", 
-                                "Seasonal (1-8 Wks)" = "#f39c12", 
-                                "Perennial (> 2 Mos)" = "#c0392b"),
-                     name = "Adult Lifespan") +
-  
-  # F. Reference Line (Global Mean)
-  # Since we are using scale_y_log10, we can still plot the raw mean, 
-  # and ggplot will position it correctly on the log axis.
-  geom_hline(yintercept = mean(df_clean$Lipid_Rel_Pct, na.rm=TRUE), 
-             linetype = "dashed", color = "grey50") +
-  
-  # G. Formatting
   theme_bw() +
   labs(
-    title = "Trade-off: Quantity vs. Quality (Grouped by Adult Lifespan)",
-    subtitle = "Both axes are Log-Transformed to show allometric scaling.",
-    x = "Quantity: Individual Mass (g) [Log Scale]",
-    y = "Quality: Relative Lipid Content [Log Scale]"
-  ) +
-  theme(
-    legend.position = "bottom",
-    axis.title = element_text(face = "bold"),
-    plot.title = element_text(face = "bold", size = 14)
-  )
-
-# Print
-print(plot_tradeoff_days)
-
-# =========================================================
-# LM Comparing lifespan and lipid content
-# =========================================================
-
-# 1. SUMMARIZE DATA BY FAMILY (Same as before)
-df_family_means <- df_fam_valid %>%
-  group_by(Order, Taxon_Group, Avg_Lifespan_Days) %>%
-  summarise(
-    Mean_Lipid = mean(Lipid_Rel_Pct, na.rm = TRUE),
-    SD_Lipid = sd(Lipid_Rel_Pct, na.rm = TRUE),
-    Count = n(),
-    SE_Lipid = SD_Lipid / sqrt(Count), 
-    .groups = "drop"
-  ) %>%
-  filter(!is.na(Avg_Lifespan_Days)) %>%
-  filter(!is.na(Mean_Lipid))
-
-# 2. GENERATE THE PLOT (No Shading)
-plot_lifespan_means <- ggplot(df_family_means, aes(x = Avg_Lifespan_Days, y = Mean_Lipid)) +
-  
-  # A. The Regression Line (Trend ONLY, no shading)
-  # se = FALSE removes the gray ribbon
-  geom_smooth(method = "lm", color = "black", linetype = "dashed", se = FALSE) +
-  
-  # B. Error Bars (Mean +/- SE)
-  geom_errorbar(aes(ymin = Mean_Lipid - SE_Lipid, 
-                    ymax = Mean_Lipid + SE_Lipid, 
-                    color = Order), 
-                width = 0.1, size = 0.6, alpha = 0.6) +
-  
-  # C. The Points (Mean Values)
-  geom_point(aes(color = Order), size = 4) +
-  
-  # D. Labels
-  geom_text_repel(aes(label = Taxon_Group), 
-                  size = 3.5, 
-                  box.padding = 0.5,
-                  max.overlaps = 20,
-                  show.legend = FALSE) +
-  
-  # E. Scales
-  scale_y_log10() + 
-  scale_x_log10()+
-  # F. Formatting
-  theme_bw() +
-  labs(
-    title = "Does Adult Lifespan Predict Nutritional Quality?",
-    subtitle = "Points = Family Means. Dashed Line = Linear Trend (Family Level).",
-    x = "Average Adult Lifespan (Days) [Log Scale]",
-    y = "Mean Nutritional Quality (Relative Lipid %)",
+    title = "Allometry of Fat Storage",
+    subtitle = "Black Line = Actual Trend. Dotted Grey = 1:1 Scaling (Isometric).",
+    x = "Insect Size (Log Mass)",
+    y = "Total Lipid Content (Log Mass)",
     color = "Order"
-  ) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    axis.title = element_text(face = "bold")
   )
 
-# Print
-print(plot_lifespan_means)
-
-# 3. STAT CHECK (Run the regression on these MEANS)
-# Does the trend hold up when we treat the Family as the unit of analysis?
-mod_means <- lm(log(Mean_Lipid) ~ log(Avg_Lifespan_Days), data = df_family_means)
-print("=== REGRESSION RESULTS (FAMILY MEANS) ===")
-summary(mod_means)
 
 
-install.packages("pwr")
-library(pwr)
+##Mass predicting relative lipid
 
-# 1. INPUT THE VALUES FROM YOUR MODEL SUMMARY
-r_squared <-  0.049
 
-# 2. CALCULATE EFFECT SIZE (Cohen's f2)
-f2_value <- r_squared / (1 - r_squared)
+library(tidyverse)
+library(scales) # For percentage labels
 
-print(paste("Observed Effect Size (f2):", round(f2_value, 5)))
+# 1. RUN THE LINEAR MODEL
+# We use Log_Weight (Size) to predict Lipid_Rel_Pct (Quality).
+# If the slope is positive, big bugs are better. If negative, big bugs are worse.
+mod_tradeoff <- lm(Logit_Lipid_Rel ~ Log_Mass, data = df_clean)
 
-# 3. RUN THE POWER TEST
-power_result <- pwr.f2.test(u = 1, 
-                            f2 = f2_value, 
-                            sig.level = 0.05, 
-                            power = 0.80)
+print("=== MODEL SUMMARY: DOES MASS PREDICT QUALITY? ===")
+summary(mod_tradeoff)
 
-print("=== SAMPLES NEEDED ===")
-print(power_result)
+# 2. VISUALIZE THE RELATIONSHIP
+ggplot(df_clean, aes(x = Log_Mass, y = Logit_Lipid_Rel)) +
+  
+  # A. The Points (Colored by Order to spot group differences)
+  geom_point(aes(color = Order), alpha = 0.6, size = 2) +
+  
+  # B. The Regression Line (The "Slope")
+  geom_smooth(method = "lm", color = "black", linetype = "dashed") +
+  
+  # C. Scales & Formatting
+  scale_y_continuous(labels = scales::percent) + # Show Y-axis as 5%, 10%
+  
+  theme_bw() +
+  labs(
+    title = "Quality-Quantity Trade-off",
+    subtitle = "Does being larger (Mass) mean being fattier (Relative Lipid)?",
+    x = "Insect Size (Log Mass)",
+    y = "Nutritional Quality (Relative Lipid %)",
+    color = "Order"
+  )
 
-# 4. CALCULATE TOTAL N
-total_n <- round(power_result$v + 1 + 1)
-print(paste("Total Samples Required:", total_n))
+
+
+
+
+
+
+
+
+
+
+
+#####Old code below
 
 #add mouth part
 library(tidyverse)
@@ -685,7 +622,7 @@ mouth_data <- tribble(
   "Crambidae",      "yes",
   "Noctuidae",      "yes",
   "Lasiocampidae",  "no",
-  "Nematocera",     "mixed",
+  "Nematocera",     "yes",
   "Carabidae",      "yes",
   "Brachycera",     "yes",
   "Leptoceridae",   "yes",
@@ -705,7 +642,8 @@ mouth_data <- tribble(
   "Staphylinidae",  "yes",
   "Tortricidae",    "yes",
   "Silphidae",      "yes",
-  "Phryganeidae",   "no"
+  "Phryganeidae",   "no",
+  "Helicopsychidae", "yes",
 )
 
 # 2. STANDARDIZE THE LABELS
@@ -733,10 +671,11 @@ print(df_clean %>% filter(is.na(Feeding_Strategy)) %>% distinct(Family))
 
 # 4. RUN THE STATISTICAL TEST
 # Does this biological trait predict fat content better than random chance?
-mod_mouth <- lm(Log_Lipid_Rel ~ Feeding_Strategy +Taxon_Group, data = df_clean)
+mod_mouth <- lm(Logit_Lipid_Rel ~ Feeding_Strategy +Taxon_Group, data = df_clean)
 
 print("=== ANOVA: FEEDING STRATEGY VS. FAT CONTENT ===")
 print(anova(mod_mouth))
+summary(mod_mouth)
 
 # 5. VISUALIZE THE RESULTS
 ggplot(df_clean %>% filter(!is.na(Feeding_Strategy)), 
@@ -755,3 +694,120 @@ ggplot(df_clean %>% filter(!is.na(Feeding_Strategy)),
     y = "Relative Lipid Content (%)"
   ) +
   theme(legend.position = "none")
+
+
+####Mouth parts biplot
+library(dplyr)
+
+df_tradeoff <- df_clean %>%
+  # Group by Family (so we get one dot per family)
+  # But also include Order and Mouthparts so those columns stay in the result
+  group_by(Family, Order, Mouth_Type) %>% 
+  summarize(
+    Mean_Mass = mean(Mass_Ind, na.rm = TRUE),
+    Mean_Quality = mean(Lipid_Rel_Pct, na.rm = TRUE),
+    Taxon_Group = first(Family), # Change label to Family name
+    .groups = "drop"
+  )
+
+# Check the result: You should see many more rows now (one for each Family)
+head(df_tradeoff)
+
+plot_tradeoff_mouthparts <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality, color = Order)) +
+  
+  # A. The Grouping Circles (Ellipses)
+  # We use 'Mouthparts' for the groups
+  stat_ellipse(aes(group = Mouth_Type, fill = Mouth_Type), 
+               geom = "polygon", alpha = 0.1, show.legend = TRUE) +
+  
+  # A2. Outlines for the circles
+  stat_ellipse(aes(group = Mouth_Type, linetype = Mouth_Type), 
+               geom = "path", color = "grey40", alpha = 0.6) +
+  
+  # B. The Points (Now representing Families)
+  geom_point(size = 3, alpha = 0.8) +
+  
+  # C. The Labels (Family Names)
+  geom_text_repel(aes(label = Taxon_Group), 
+                  size = 3, 
+                  box.padding = 0.4, 
+                  max.overlaps = 20,
+                  show.legend = FALSE) +
+  
+  # D. Scales & Colors
+  scale_x_log10() + 
+  
+  # Colors for Mouthparts (Make sure these match your data: "Yes", "No", "Mixed")
+  scale_fill_manual(values = c("yes" = "forestgreen", 
+                               "no" = "firebrick", 
+                               "mixed" = "orange")) +
+  
+  # E. Reference Line (Global Average)
+  geom_hline(yintercept = mean(df_clean$Lipid_Rel_Pct, na.rm=TRUE), 
+             linetype = "dashed", color = "grey50") +
+  
+  # F. Formatting
+  theme_bw() +
+  labs(
+    title = "The Trade-off: Quantity vs. Quality (Family Averages)",
+    subtitle = "Points = Families. Ellipses = Functional Mouthparts.",
+    x = "Quantity: Individual Mass (g) [Log Scale]",
+    y = "Quality: Relative Lipid Content (Proportion)",
+    fill = "Mouthparts",
+    linetype = "Mouthparts"
+  ) +
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+# Print
+print(plot_tradeoff_mouthparts)
+
+library(tidyverse)
+
+# 1. FORCE CORRECT MONTH ORDER
+# R defaults to alphabetical (April, August...), so we manually fix the levels.
+df_clean <- df_clean %>%
+  mutate(
+    Month = factor(Month, levels = c("May", "June", "July", "August", "September"))
+  ) %>%
+  # Filter out any rows with missing months
+  filter(!is.na(Month))
+
+# 2. GENERATE THE PLOT
+ggplot(df_clean, aes(x = Month, y = Lipid_Rel_Pct)) +
+  
+  # A. The Boxplot (Shows the spread/variance each month)
+  geom_boxplot(aes(fill = Month), alpha = 0.6, outlier.shape = NA) +
+  
+  # B. The Raw Points (To see sample size)
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5) +
+  
+  # C. The Trend Line (Connecting the Means)
+  # This helps answer "Does it increase?" by drawing a line through the average of each month.
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 4, color = "black") +
+  stat_summary(fun = mean, geom = "line", aes(group = 1), color = "black", size = 1, linetype = "dashed") +
+  
+  # D. Scales & Labels
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "YlOrRd") + # "Yellow-Orange-Red" palette looks like summer/autumn
+  
+  theme_bw() +
+  labs(
+    title = "Seasonal Trend: Does Fat Content Increase?",
+    subtitle = "Diamonds/Dashed Line = Monthly Mean. Boxplots = Distribution.",
+    x = "Month",
+    y = "Relative Lipid Content (%)"
+  ) +
+  theme(legend.position = "none")
+
+# 3. STATISTICAL CHECK
+# We convert Month to a number (1, 2, 3...) to test for a linear trend (Slope).
+mod_season <- lm(Logit_Lipid_Rel ~ as.numeric(Month), data = df_clean)
+
+print("=== DOES MONTH PREDICT FAT? (Linear Trend) ===")
+summary(mod_season)
+
+

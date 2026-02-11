@@ -6,8 +6,7 @@ library(ggpubr)
 library(emmeans)
 
 # Load Data
-df <- read.csv("Insect_Nutrition_Prelim.csv", check.names = FALSE)
-
+df = read.csv("FebInsectNutrition.csv", check.names = FALSE)
 # =========================================================
 # 2. DATA CALCULATION
 # =========================================================
@@ -1163,7 +1162,7 @@ df_biplot <- df_clean %>%
   filter(Feeding_Guild != "Excluded")
 
 # 2. GENERATE THE BIPLOT
-ggplot(df_biplot, aes(x = Log_Mass, y = Log_Lipid_Rel, color = Feeding_Guild, fill = Feeding_Guild)) +
+ggplot(df_biplot, aes(x = Log_Mass, y = Log_Lipid_Rel, color = Mouth_Type, fill = Mouth_Type)) +
   
   # A. The Points
   geom_point(size = 3, alpha = 0.7) +
@@ -1180,10 +1179,10 @@ ggplot(df_biplot, aes(x = Log_Mass, y = Log_Lipid_Rel, color = Feeding_Guild, fi
   scale_y_continuous(labels = function(x) paste0(round(exp(x) * 100, 1), "%")) +
   
   # E. Custom Colors (Orange for Capital, Blue for Income)
-  scale_color_manual(values = c("Capital (Non-Feeding)" = "#E69F00", 
-                                "Income (Feeding)" = "#56B4E9")) +
-  scale_fill_manual(values = c("Capital (Non-Feeding)" = "#E69F00", 
-                               "Income (Feeding)" = "#56B4E9")) +
+  scale_color_manual(values = c("yes" = "#E69F00", 
+                                "no" = "#56B4E9")) +
+  scale_fill_manual(values = c("yes" = "#E69F00", 
+                               "no" = "#56B4E9")) +
   
   # F. Theme & Labels
   theme_bw() +
@@ -1225,7 +1224,7 @@ df_vis <- df_clean %>%
   filter(!is.na(Sample_ID), !is.na(Lipid_Rel_Pct))
 
 # 2. GENERATE THE RANKED PLOT
-ggplot(df_vis, aes(x = reorder(Sample_ID, Lipid_Rel_Pct, FUN = median), y = Lipid_Rel_Pct)) +
+ggplot(df_vis, aes(x = reorder(Sample_ID, Lipid_Rel_Pct, FUN = mean), y = Lipid_Rel_Pct)) +
   
   # A. The Boxplot (Shows the spread of data for each group)
   geom_boxplot(aes(fill = Order), alpha = 0.7, outlier.shape = NA) +
