@@ -165,6 +165,25 @@ mouth_data <- tribble(
   "Helicopsychidae", "yes",
 )
 
+# 2. STANDARDIZE THE LABELS
+# We map the raw "yes/no/mixed" to scientific terms.
+mouth_data <- mouth_data %>%
+  mutate(
+    Feeding_Strategy = case_when(
+      Mouth_Type == "no"    ~ "Capital (Non-Feeding)",
+      Mouth_Type == "yes"   ~ "Income (Feeding)",
+      Mouth_Type == "mixed" ~ "Mixed/Variable",
+      TRUE ~ "Unknown"
+    )
+  )
+
+# 3. MERGE WITH YOUR MAIN DATA
+# We overwrite df_clean with the new version containing the 'Feeding_Strategy' column
+df_clean <- df_clean %>%
+  # Remove the old Feeding_Strategy column if it exists to avoid duplicates
+  select(-any_of(c("Mouth_Type", "Feeding_Strategy"))) %>%
+  left_join(mouth_data, by = "Family")
+
 # =========================================================
 # 4. TWO-WAY ANOVA (Order + Month)
 # =========================================================
@@ -212,7 +231,6 @@ print("--- 2. Family Level ---")
 print(anova(mod_fam_mass_valid))
 print(anova(mod_fam_total_valid))
 print(anova(mod_fam_rel_valid))
-summary(mod_fam_mass_valid)
 
 # =========================================================
 # 5. SCIENTIFIC PLOTTING (Boxplots)
