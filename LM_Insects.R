@@ -12,8 +12,6 @@ library(lme4)
 library(glmmTMB)  # For Generalized Linear Mixed Models (GLMMs), specifically Beta regression
 library(DHARMa)
 library(car)
-library(performance)
-library(ggsignif)
 
 # Load Data
 df <- read.csv("FebInsectNutrition.csv", check.names = FALSE)
@@ -51,6 +49,25 @@ df_clean <- df %>%
 # =========================================================
 # 3. NORMALITY TESTING (Raw vs. Log)
 # =========================================================
+
+print("=== SHAPIRO-WILK NORMALITY TESTS ===")
+
+# A. Mass (Size)
+print("--- 1. Individual Mass ---")
+print(paste("Raw Data p:", format(shapiro.test(df_clean$Mass_Ind)$p.value, digits=3)))
+print(paste("Log Data p:", format(shapiro.test(df_clean$Log_Mass)$p.value, digits=3)))
+
+# B. Total Lipid Content
+print("--- 2. Total Lipid Content ---")
+print(paste("Raw Data p:", format(shapiro.test(df_clean$Lipid_Total)$p.value, digits=3)))
+print(paste("Log Data p:", format(shapiro.test(df_clean$Log_Lipid_Total)$p.value, digits=3)))
+
+# C. Relative Lipid Content
+print("--- 3. Relative Lipid Content ---")
+print(paste("Raw Data p:", format(shapiro.test(df_clean$Lipid_Rel_Pct)$p.value, digits=3)))
+print(paste("Log Data p:", format(shapiro.test(df_clean$Log_Lipid_Rel)$p.value, digits=3)))
+
+##log didn't help, inspecting with qq
 # Set up a 3x2 grid to view all plots at once
 par(mfrow=c(3,2))
 
@@ -84,12 +101,11 @@ qqline(df_clean$Log_Lipid_Rel, col="red", lwd=2)
 # Reset plot layout to default
 par(mfrow=c(1,1))
 
-##Moving forward with logged data
-
 # =========================================================
-# Add Mouth column
+# ADD Mouth column
 # =========================================================
 # 1. CREATE THE MOUTH LOOKUP TABLE
+# Transcribed exactly from your updated image (image_2dfeff.png)
 mouth_data <- tribble(
   ~Family,          ~Mouth_Type,
   "Geometridae",    "yes",
@@ -121,6 +137,7 @@ mouth_data <- tribble(
 )
 
 # 2. STANDARDIZE THE LABELS
+# We map the raw "yes/no/mixed" to scientific terms.
 mouth_data <- mouth_data %>%
   mutate(
     Feeding_Strategy = case_when(
@@ -132,53 +149,57 @@ mouth_data <- mouth_data %>%
   )
 
 # 3. MERGE WITH YOUR MAIN DATA
+# We overwrite df_clean with the new version containing the 'Feeding_Strategy' column
 df_clean <- df_clean %>%
+  # Remove the old Feeding_Strategy column if it exists to avoid duplicates
   select(-any_of(c("Mouth_Type", "Feeding_Strategy"))) %>%
   left_join(mouth_data, by = "Family")
 
-# =========================================================
-# Add habitat column
-# =========================================================
+##Aquatic addtion
 habitat_data <- tribble(
   ~Family,           ~Habitat_Type,
   "Geometridae",     "terrestrial",
-  "Crambidae",       "mixed",        
+  "Crambidae",       "mixed",        # Many are terrestrial, but Acentropinae are aquatic
   "Noctuidae",       "terrestrial",
   "Lasiocampidae",   "terrestrial",
-  "Nematocera",      "semi-aquatic", 
-  "Carabidae",       "terrestrial",  
-  "Brachycera",      "mixed",        
-  "Leptoceridae",    "semi-aquatic", 
+  "Nematocera",      "semi-aquatic", # Broad suborder, but overwhelmingly aquatic/semi-aquatic in larval stages (e.g., midges, mosquitoes)
+  "Carabidae",       "terrestrial",  # Mostly terrestrial, though some are riparian
+  "Brachycera",      "mixed",        # Broad suborder; includes both terrestrial flies and semi-aquatic (e.g., Tabanidae, Stratiomyidae)
+  "Leptoceridae",    "semi-aquatic", # Caddisfly: aquatic larvae, terrestrial adults
   "Notodontidae",    "terrestrial",
   "Elateridae",      "terrestrial",
   "Erebidae",        "terrestrial",
   "Pyralidae",       "terrestrial",
-  "Microlep",        "terrestrial", 
+  "Microlep",        "terrestrial",  # Broad grouping, overwhelmingly terrestrial
   "Gelechiidae",     "terrestrial",
-  "Caenidae",        "semi-aquatic", 
-  "Hydroptilidae",   "semi-aquatic", 
-  "Limnephilidae",   "semi-aquatic", 
-  "Heptageniidae",   "semi-aquatic", 
-  "Ephemeridae",     "semi-aquatic", 
+  "Caenidae",        "semi-aquatic", # Mayfly: aquatic larvae, terrestrial adults
+  "Hydroptilidae",   "semi-aquatic", # Caddisfly: aquatic larvae, terrestrial adults
+  "Limnephilidae",   "semi-aquatic", # Caddisfly: aquatic larvae, terrestrial adults
+  "Heptageniidae",   "semi-aquatic", # Mayfly: aquatic larvae, terrestrial adults
+  "Ephemeridae",     "semi-aquatic", # Mayfly: aquatic larvae, terrestrial adults
   "Cosmopterigidae", "terrestrial",
-  "Heteroceridae",   "semi-aquatic", 
-  "Staphylinidae",   "terrestrial",  
+  "Heteroceridae",   "semi-aquatic", # Mud-loving beetles, live in riparian zones
+  "Staphylinidae",   "terrestrial",  # Mostly terrestrial, some live near water
   "Tortricidae",     "terrestrial",
   "Silphidae",       "terrestrial",
-  "Phryganeidae",    "semi-aquatic", 
-  "Helicopsychidae", "semi-aquatic"  
+  "Phryganeidae",    "semi-aquatic", # Caddisfly: aquatic larvae, terrestrial adults
+  "Helicopsychidae", "semi-aquatic"  # Caddisfly: aquatic larvae, terrestrial adults
 )
 
 
 df_clean <- df_clean %>%
+  # 1. Remove old columns if they exist to prevent name clutter (.x, .y)
   select(-any_of(c("Habitat_Type"))) %>%
+  
+  # 2. Left join the new habitat_data table
+  # This keeps all rows in df_clean and adds the habitat info where it matches
   left_join(habitat_data, by = "Family")
 
 
-# =========================================================
-# Seeing if it's important to retain sample month
-# =========================================================
-##### Mass
+########################
+#Seeing if I should include month in my models
+#######################
+#Mass
 # Model without Month
 mod_no_month_mass <- lmer(Log_Mass ~ Order + Mouth_Type + (1 | Family), data = df_clean, REML = FALSE)
 # Model with Month
@@ -186,7 +207,7 @@ mod_with_month_mass <- lmer(Log_Mass ~ Order + Mouth_Type + (1 | Family) + (1 | 
 # Compare them
 anova(mod_no_month_mass, mod_with_month_mass)
 
-##### Lipid (unsure if I'm going to keep lipid)
+#Lipid
 # Model without Month
 mod_no_month_lipid <- lmer(Log_Lipid_Total ~ Order + Mouth_Type + (1 | Family), data = df_clean, REML = FALSE)
 # Model with Month
@@ -194,7 +215,7 @@ mod_with_month_lipid <- lmer(Log_Lipid_Total ~ Order + Mouth_Type + (1 | Family)
 # Compare them
 anova(mod_no_month_lipid, mod_with_month_lipid)
 
-##### Rel Lipid
+#Rel Lipid
 # Model without Month
 mod_no_month <- lmer(Log_Lipid_Rel ~ Order + Mouth_Type + (1 | Family), data = df_clean, REML = FALSE)
 # Model with Month
@@ -202,18 +223,97 @@ mod_with_month <- lmer(Log_Lipid_Rel ~ Order + Mouth_Type + (1 | Family) + (1 | 
 # Compare them
 anova(mod_no_month, mod_with_month)
 
-## --> Don't bother including month
+## Dont bother including month
 
 # =========================================================
-# Set up boxplot criteria for figures
+# Justify size separation SAYS Seperate by size 
 # =========================================================
-create_phd_boxplot <- function(data, x_var, y_var, fill_var, title_text, y_label, model = NULL) {
+library(dplyr)
+library(stringr)
+
+# 1. Prepare the data without aggressive filtering
+df_direct <- df_clean %>%
+  mutate(
+    Base_Family = str_trim(str_remove(Family, "\\(>1\\)|\\(<1\\)")),
+    Size_Tag = case_when(
+      str_detect(Family, ">1") ~ ">1",
+      str_detect(Family, "<1") ~ "<1",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(Size_Tag))
+
+# 2. Get the list of all families that have at least two entries
+all_families <- unique(df_direct$Base_Family)
+
+# 3. Force the comparison for every family
+final_comparison <- data.frame()
+
+for (fam in all_families) {
+  sub <- df_direct %>% filter(Base_Family == fam)
   
-  # 1. Force the x-variable to be a factor and capture its order
-  data[[x_var]] <- as.factor(data[[x_var]])
-  levs <- levels(data[[x_var]])
+  # Only attempt if there are at least 2 distinct size groups present
+  if (length(unique(sub$Size_Tag)) == 2) {
+    
+    # Using a simple t-test; if it fails (e.g., n=1 in a group), it skips silently
+    test <- try(t.test(Log_Lipid_Rel ~ Size_Tag, data = sub), silent = TRUE)
+    
+    if (!inherits(test, "try-error")) {
+      final_comparison <- rbind(final_comparison, data.frame(
+        Family = fam,
+        P_Value = round(test$p.value, 4),
+        Mean_Small = round(as.numeric(test$estimate[1]), 3),
+        Mean_Large = round(as.numeric(test$estimate[2]), 3)
+      ))
+    }
+  }
+}
+
+# 4. View results and make the decision for your Ontario Bat Network abstract
+if (nrow(final_comparison) > 0) {
+  final_comparison$Significant <- ifelse(final_comparison$P_Value < 0.05, "KEEP SEPARATE", "COMBINE")
+  print(final_comparison)
+} else {
+  print("Check your 'Family' column strings; no matches for '<1' or '>1' were found.")
+}
+
+
+#############THIS FEELS VERY LEGIT 
+#1. Taxonomy
+# Nested model: Family is nested within Order (Order / Family)
+mod_tax <- lm(Log_Lipid_Rel ~ Order / Sample_ID, data = df_clean)
+Anova(mod_tax, type = "II")
+
+# 2. Functional Model
+mod_func <- lm(Log_Lipid_Rel ~ Order + Mouth_Type, data = df_clean)
+Anova(mod_func, type = "II")
+
+# 3. Environmental Model
+mod_habitat <- lm(Log_Lipid_Rel ~ Order + Habitat_Type, data = df_clean)
+Anova(mod_habitat, type = "II")
+
+
+#####Visualize, pulling our order differences
+library(emmeans)
+
+order_means <- emmeans(mod_tax, ~ Order)
+
+order_pairs <- contrast(order_means, method = "pairwise")
+
+order_pairs_df <- as.data.frame(order_pairs)
+
+significant_orders <- subset(order_pairs_df, p.value < 0.05)
+
+print(significant_orders[, c("contrast", "estimate", "p.value")])
+
+###set up box plot style 
+library(ggplot2)
+library(ggsignif)
+library(emmeans)
+
+create_boxplot_clean <- function(data, x_var, y_var, fill_var, title_text, y_label, model = NULL) {
   
-  # 2. Base Plot
+  # 1. Base Plot (Vertical)
   p <- ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]], fill = .data[[fill_var]])) +
     geom_boxplot(outlier.shape = NA, width = 0.6, alpha = 0.3, color = "black") +
     geom_jitter(width = 0.2, alpha = 0.5, size = 1.5, color = "darkgray") +
@@ -223,802 +323,161 @@ create_phd_boxplot <- function(data, x_var, y_var, fill_var, title_text, y_label
           axis.title.y = element_text(face = "bold")) +
     labs(title = title_text, y = y_label, x = "")
   
-  # 3. Bracket Logic
+  # 2. Manual Nuclear Option
   if (!is.null(model)) {
-    emm <- emmeans(model, specs = x_var)
-    pairs_data <- as.data.frame(pairs(emm, adjust = "tukey"))
-    sig_pairs <- pairs_data[pairs_data$p.value < 0.05, ]
+    # Get the order of categories on the plot
+    levs <- levels(as.factor(data[[x_var]]))
     
-    if (nrow(sig_pairs) > 0) {
-      xmin_vec <- numeric(nrow(sig_pairs))
-      xmax_vec <- numeric(nrow(sig_pairs))
-      
-      for(i in 1:nrow(sig_pairs)) {
-        # Split the contrast (e.g., "mixed - terrestrial")
-        pair <- trimws(strsplit(as.character(sig_pairs$contrast[i]), " - ")[[1]])
-        
-        # FUZZY MATCH: find which axis level is IN the model's pair strings
-        # This handles hidden spaces or "Habitat_Type" prefixes automatically
-        xmin_match <- which(sapply(levs, function(l) grepl(tolower(trimws(l)), tolower(pair[1]))))
-        xmax_match <- which(sapply(levs, function(l) grepl(tolower(trimws(l)), tolower(pair[2]))))
-        
-        # Only assign if a match was found to prevent the "length zero" error
-        if(length(xmin_match) > 0) xmin_vec[i] <- xmin_match[1]
-        if(length(xmax_match) > 0) xmax_vec[i] <- xmax_match[1]
-      }
-      
-      # Filter out any pairs that failed to match
-      valid <- xmin_vec > 0 & xmax_vec > 0
-      
-      if(any(valid)) {
-        max_y <- max(data[[y_var]], na.rm = TRUE)
-        y_range <- max_y - min(data[[y_var]], na.rm = TRUE)
-        ladder <- seq(from = max_y + (y_range * 0.1), 
-                      by = y_range * 0.15, 
-                      length.out = sum(valid))
-        
-        p <- p + geom_signif(
-          xmin = xmin_vec[valid], 
-          xmax = xmax_vec[valid],
-          y_position = ladder,
-          annotations = rep("*", sum(valid)),
-          tip_length = 0.02, 
-          color = "black", 
-          textsize = 7, 
-          vjust = 0.5
-        ) +
-          # Ensures brackets aren't clipped off the top of the plot
-          scale_y_continuous(expand = expansion(mult = c(0.05, 0.4)))
-      }
-    }
+    # Manually defining your 6 significant pairs as numeric coordinates
+    # 1=Coleoptera, 2=Diptera, 3=Ephemeroptera, 4=Lepidoptera, 5=Trichoptera
+    # These match your emmeans printout exactly
+    xmin_vec <- c(1, 1, 2, 2, 3, 3) 
+    xmax_vec <- c(2, 3, 4, 5, 4, 5)
+    
+    # Set fixed heights for the 6-rung ladder
+    max_y <- max(data[[y_var]], na.rm = TRUE)
+    ladder <- seq(from = max_y + 0.5, by = 0.5, length.out = 6)
+    
+    p <- p + geom_signif(
+      xmin = xmin_vec,
+      xmax = xmax_vec,
+      y_position = ladder,
+      annotations = rep("*", 6),
+      tip_length = 0.02,
+      color = "black",
+      textsize = 7, # Larger stars for the poster
+      vjust = 0.5
+    ) +
+      # Force the Y-axis tall enough so no brackets get clipped
+      expand_limits(y = max(ladder) + 0.5)
   }
+  
   return(p)
 }
+# This creates the missing object
+mod_viz_order <- lm(Log_Lipid_Rel ~ Order, data = df_clean)
+
+plot_order <- create_boxplot_clean(data = df_clean, 
+                                   x_var = "Order", 
+                                   y_var = "Log_Lipid_Rel", 
+                                   fill_var = "Order", 
+                                   title_text = "Relative Lipid Content by Taxonomic Order", 
+                                   y_label = "Log Relative Lipid Content", 
+                                   model = mod_viz_order)
+
+plot_order
 
 
-# =========================================================
-# Looking at factors that best predict Mass
-# =========================================================
-#1. Taxonomy
-# Nested model: Family is nested within Order (Order / Family)
-mod_tax_mass <- lm(Log_Mass ~ Order / Sample_ID, data = df_clean)
-Anova(mod_tax_mass, type = "II")
-
-# 2. Functional Model
-mod_func_mass <- lm(Log_Mass ~ Order + Mouth_Type, data = df_clean)
-Anova(mod_func_mass, type = "II")
-
-# 3. Environmental Model
-mod_habitat_mass <- lm(Log_Mass ~ Order + Habitat_Type, data = df_clean)
-Anova(mod_habitat_mass, type = "II")
 
 
-#####Visualize mass
 
-#pulling out order differences in mass
-order_means_mass <- emmeans(mod_tax_mass, ~ Order)
-order_pairs_mass <- contrast(order_means_mass, method = "pairwise")
-order_pairs_df_mass <- as.data.frame(order_pairs_mass)
-significant_orders_mass <- subset(order_pairs_df_mass, p.value < 0.05)
-print(significant_orders_mass[, c("contrast", "estimate", "p.value")])
 
-#pulling out functional differences in mass
-func_means_mass <- emmeans(mod_func_mass, ~ Mouth_Type)
-func_pairs_mass <- contrast(func_means_mass, method = "pairwise")
-func_pairs_df_mass <- as.data.frame(func_pairs_mass)
-significant_func_mass <- subset(func_pairs_df_mass, p.value < 0.05)
-print(significant_func_mass[, c("contrast", "estimate", "p.value")])
 
-#pulling out habitat differences in mass
-hab_means_mass <- emmeans(mod_habitat_mass, ~ Habitat_Type )
-hab_pairs_mass <- contrast(hab_means_mass, method = "pairwise")
-hab_pairs_df_mass <- as.data.frame(hab_pairs_mass)
-significant_hab_mass <- subset(hab_pairs_df_mass, p.value < 0.05)
-print(significant_hab_mass[, c("contrast", "estimate", "p.value")])
 
-##Visualize order differences in mass
-#Order (having to do this because the nesting doesn't yield brackets)
-# 1. Define the 5 significant pairs 
-mass_comparisons <- list(
-  c("Coleoptera", "Diptera"),
-  c("Coleoptera", "Ephemeroptera"),
-  c("Coleoptera", "Trichoptera"),
-  c("Diptera", "Ephemeroptera"),
-  c("Diptera", "Lepidoptera"),
-  c("Diptera", "Trichoptera"),
-  c("Ephemeroptera", "Lepidoptera"),
-  c("Lepidoptera", "Trichoptera")
-)
 
-# 2. Create the final plot
-plot_mass_nested <- ggplot(df_clean, aes(x = Order, y = Log_Mass, fill = Order)) +
-  geom_boxplot(outlier.shape = NA, width = 0.6, alpha = 0.3, color = "black") +
-  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5, color = "darkgray") +
+
+
+
+
+
+
+
+
+
+library(ggplot2)
+
+# Calculate means and standard errors per Sample_ID
+df_summary <- df_clean %>%
+  group_by(Order, Sample_ID) %>%
+  summarize(
+    mean_lipid = mean(Log_Lipid_Rel, na.rm = TRUE),
+    se_lipid = sd(Log_Lipid_Rel, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+ggplot(df_summary, aes(x = reorder(Sample_ID, mean_lipid), y = mean_lipid, color = Order)) +
+  geom_pointrange(aes(ymin = mean_lipid - se_lipid, ymax = mean_lipid + se_lipid), size = 0.8) +
+  coord_flip() +
   theme_bw() +
-  theme(legend.position = "none",
-        axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 12),
-        axis.title.y = element_text(face = "bold")) +
-  labs(title = "Insect Biomass by Taxonomic Order", 
-       y = "Log Total Mass (mg)", 
-       x = "") +
-  
-  # 3. Add the significance brackets manually
-  geom_signif(
-    comparisons = mass_comparisons,
-    annotations = rep("*", length(mass_comparisons)),
-    step_increase = 0.12, 
-    color = "black",
-    textsize = 7,
-    vjust = 0.5
-  ) +
-  
-  # 4. Expand the Y-axis so the brackets don't get cut off
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.5)))
+  theme(axis.text.y = element_text(size = 10, face = "bold"),
+        legend.position = "bottom") +
+  labs(title = "Ranked Lipid Content by Family (Sample_ID)",
+       x = "Family / Size Category",
+       y = "Mean Log Relative Lipid (+/- SE)")
 
-# View the plot
-plot_mass_nested
 
-#Functional
-plot_func_mass <- create_phd_boxplot(
-  data = df_clean, 
-  x_var = "Mouth_Type", 
-  y_var = "Log_Mass", 
-  fill_var = "Mouth_Type", 
-  title_text = "Insect Biomass by Mouth Type", 
-  y_label = "Log Total Mass (mg)", 
-  model = mod_func_mass # This triggers the brackets!
-)
-plot_func_mass
 
-#Habitat
-plot_hab_mass <- create_phd_boxplot(
-  data = df_clean, 
-  x_var = "Habitat_Type", 
-  y_var = "Log_Mass", 
-  fill_var = "Habitat_Type", 
-  title_text = "Insect Biomass by Habitat Type", 
-  y_label = "Log Total Mass (mg)", 
-  model = mod_habitat_mass
-)
-plot_hab_mass
 
-# =========================================================
-# Which best describes size drivers of insect orders?
-# =========================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#############################
+# Taxonomic Models
+mod_mass_tax <- lm(Log_Mass ~ Order / Family, data = df_clean)
+mod_lipid_tax <- lm(Log_Lipid_Total ~ Order / Family, data = df_clean)
+mod_rel_tax <- lm(Log_Lipid_Rel ~ Order / Family, data = df_clean)
+
+# Functional Models
+mod_mass_func <- lm(Log_Mass ~ Order + Mouth_Type, data = df_clean)
+mod_lipid_func <- lm(Log_Lipid_Total ~ Order + Mouth_Type, data = df_clean)
+mod_rel_func <- lm(Log_Lipid_Rel ~ Order + Mouth_Type, data = df_clean)
+
+#Habitat model
+mod_mass_habitat <- lm(Log_Mass ~ Order + Habitat_Type, data = df_clean)
+mod_lipid_habitat <- lm(Log_Lipid_Total ~ Order + Habitat_Type, data = df_clean)
+mod_rel_habitat <- lm(Log_Lipid_Rel ~ Order + Habitat_Type, data = df_clean)
+
+
+
+library(performance) # Useful for comparing models
+
+# Function to compare the two models for a single metric
 compare_models <- function(tax_mod, func_mod, hab_mod, label) {
   cat("\n--- Comparison for:", label, "---\n")
   print(compare_performance(tax_mod, func_mod, rank = TRUE))
 }
 
+# Run comparisons
 # Comparison for Mass
-compare_performance(mod_tax_mass, mod_func_mass, mod_habitat_mass, rank = TRUE)
+compare_performance(mod_mass_tax, mod_mass_func, mod_mass_habitat, rank = TRUE)
 
-# =========================================================
-# Looking at factors that best predict Relative Lipid content
-# =========================================================
-#1. Taxonomy
-# Nested model: Family is nested within Order (Order / Family)
-mod_tax_rel_lipid <- lm(Log_Lipid_Rel ~ Order / Sample_ID, data = df_clean)
-Anova(mod_tax_rel_lipid, type = "II")
+# Comparison for Total Lipid
+compare_performance(mod_lipid_tax, mod_lipid_func, mod_lipid_habitat, rank = TRUE)
 
-# 2. Functional Model
-mod_func_rel_lipid <- lm(Log_Lipid_Rel ~ Order + Mouth_Type, data = df_clean)
-Anova(mod_func_rel_lipid, type = "II")
-
-# 3. Environmental Model
-mod_hab_rel_lipid <- lm(Log_Lipid_Rel ~ Order + Habitat_Type, data = df_clean)
-Anova(mod_hab_rel_lipid, type = "II")
-
-
-#####Visualize, pulling our order differences
-#Order
-order_means_rel_lipid <- emmeans(mod_tax_rel_lipid, ~ Order)
-order_pairs_rel_lipid <- contrast(order_means_rel_lipid, method = "pairwise")
-order_pairs_df_rel_lipid <- as.data.frame(order_pairs_rel_lipid)
-significant_orders_rel_lipid <- subset(order_pairs_df_rel_lipid, p.value < 0.05)
-print(significant_orders_rel_lipid[, c("contrast", "estimate", "p.value")])
-
-#Functional
-func_means_rel_lipid <- emmeans(mod_func_rel_lipid, ~ Mouth_Type)
-func_pairs_rel_lipid <- contrast(func_means_rel_lipid, method = "pairwise")
-func_pairs_df_rel_lipid <- as.data.frame(func_pairs_rel_lipid)
-significant_func_rel_lipid <- subset(func_pairs_df_rel_lipid, p.value < 0.05)
-print(significant_func_rel_lipid[, c("contrast", "estimate", "p.value")])
-
-#Habitat
-hab_means_rel_lipid <- emmeans(mod_hab_rel_lipid, ~ Habitat_Type)
-hab_pairs_rel_lipid <- contrast(hab_means_rel_lipid, method = "pairwise")
-hab_pairs_df_rel_lipid <- as.data.frame(hab_pairs_rel_lipid)
-significant_hab_rel_lipid <- subset(hab_pairs_df_rel_lipid, p.value < 0.05)
-print(significant_hab_rel_lipid[, c("contrast", "estimate", "p.value")])
-
-##Visualize order differences in relative lipid
-#Order (have to manually add brackets because it doesn't like the nesting)
-manual_comparisons <- list(
-  c("Coleoptera", "Diptera"),
-  c("Coleoptera", "Ephemeroptera"),
-  c("Diptera", "Lepidoptera"),
-  c("Diptera", "Trichoptera"),
-  c("Ephemeroptera", "Lepidoptera"),
-  c("Ephemeroptera", "Trichoptera")
-)
-
-# 2. Create the plot using your nested model data
-plot_manual_brackets <- ggplot(df_clean, aes(x = Order, y = Log_Lipid_Rel, fill = Order)) +
-  geom_boxplot(outlier.shape = NA, width = 0.6, alpha = 0.3, color = "black") +
-  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5, color = "darkgray") +
-  theme_bw() +
-  theme(legend.position = "none",
-        axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 12),
-        axis.title.y = element_text(face = "bold")) +
-  labs(title = "Nutritional Quality by Taxonomic Order", 
-       y = "Log Relative Lipid Content", 
-       x = "") +
-  
-  # 3. Manually add the brackets
-  geom_signif(
-    comparisons = manual_comparisons,
-    annotations = rep("*", length(manual_comparisons)), # Adds one star per bracket
-    step_increase = 0.12, # Spreads the 6 brackets out vertically so they don't overlap
-    color = "black",
-    textsize = 7,
-    vjust = 0.5
-  ) +
-  
-  # 4. Expand the Y-axis so the 6-rung ladder fits on your poster
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.6)))
-
-plot_manual_brackets
-
-#Functional
-plot_func_mass <- create_phd_boxplot(
-  data = df_clean, 
-  x_var = "Mouth_Type", 
-  y_var = "Log_Mass", 
-  fill_var = "Mouth_Type", 
-  title_text = "Insect Biomass by Mouth Type", 
-  y_label = "Log Total Mass (mg)", 
-  model = mod_func_mass # This triggers the brackets!
-)
-plot_func_mass
-
-#Habitat
-plot_hab_mass <- create_phd_boxplot(
-  data = df_clean, 
-  x_var = "Habitat_Type", 
-  y_var = "Log_Mass", 
-  fill_var = "Habitat_Type", 
-  title_text = "Insect Biomass by Habitat Type", 
-  y_label = "Log Total Mass (mg)", 
-  model = mod_habitat_mass
-)
-plot_hab_mass
-
-# =========================================================
-# Which best describes size drivers of insect orders?
-# =========================================================
-compare_models_rel_lipid <- function(mod_tax_rel_lipid, mod_func_rel_lipid, mod_hab_rel_lipid, label) {
-  cat("\n--- Comparison for:", label, "---\n")
-  print(compare_performance(mod_tax_rel_lipid, mod_func_rel_lipid, rank = TRUE))
-}
-
-# Comparison for Mass
-compare_performance(mod_tax_rel_lipid, mod_func_rel_lipid, mod_hab_rel_lipid, rank = TRUE)
-
-
-# =========================================================
-# Creating plots to comapre groups
-# =========================================================
-create_boxplot_clean <- function(data, x_var, y_var, fill_var, title_text, y_label, model = NULL) {
-  
-  # 1. Calculate the starting height for brackets
-  # We start drawing 10% above the highest data point
-  max_val <- max(data[[y_var]], na.rm = TRUE)
-  start_y <- max_val * 1.1 
-  
-  # 2. Base Plot
-  p <- ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]], color = .data[[fill_var]])) +
-    geom_boxplot(outlier.shape = NA, width = 0.6) +
-    geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
-    
-    # Log Scale
-    scale_y_log10() + 
-    
-    # Theme
-    theme_bw() +
-    theme(legend.position = "none",
-          axis.text.y = element_text(face = "bold", size = 10)) +
-    labs(title = title_text, y = y_label, x = "") +
-    coord_flip() 
-  
-  # 3. Add Brackets (If model provided)
-  if (!is.null(model)) {
-    stat.test <- get_tukey_data(model, x_var)
-    
-    if (nrow(stat.test) > 0) {
-      # We assign the SAME y.position to all brackets initially
-      stat.test$y.position <- start_y
-      
-      # We use 'step.increase' to automatically stack them 
-      # 0.1 adds 10% spacing between each bracket
-      p <- p + stat_pvalue_manual(
-        stat.test, 
-        label = "label", 
-        y.position = "y.position",
-        step.increase = 0.12,    # <--- This fixes the overlapping!
-        coord.flip = TRUE,       # Essential for flipped plots
-        size = 6,                # Size of the star
-        bracket.size = 0.8,
-        tip.length = 0.01
-      )
-      
-      # Expand the plot limits so the highest bracket doesn't get cut off
-      # We estimate how much space we need based on number of comparisons
-      expansion_factor <- 1.1 + (nrow(stat.test) * 0.15)
-      p <- p + expand_limits(y = max_val * expansion_factor)
-    }
-  }
-  
-  return(p)
-}
-
-# 1. Mass (Size)
-p_fam_mass <- create_boxplot_clean(
-  data = df_clean, 
-  x_var = "Sample_ID", 
-  y_var = "Mass_Ind", 
-  fill_var = "Order",
-  title_text = "A) Individual Size", 
-  y_label = "Mass (g) - Log Scale"
-) + 
-  facet_grid(Order ~ ., scales = "free_y", space = "free_y")
-
-# 2. Relative Lipid
-p_fam_rel <- create_boxplot_clean(
-  data = df_clean, 
-  x_var = "Sample_ID", 
-  y_var = "Lipid_Rel_Pct", 
-  fill_var = "Order",
-  title_text = "B) Relative Lipid Content", 
-  y_label = "Relative Lipid (Proportion) - Log Scale"
-) + 
-  facet_grid(Order ~ ., scales = "free_y", space = "free_y")
-
-# Print to verify
-print(p_fam_mass)
-print(p_fam_rel)
-
-multi_panel_fam= p_fam_mass | p_fam_rel
-print(multi_panel_fam)
-
-
-# =========================================================
-# Heatmap comparing families
-# =========================================================
-# Same fit as mod_tax_mass, but "flat" for the heatmap
-mod_heatmap_mass <- lm(Log_Mass ~ Sample_ID, data = df_clean)
-
-# Same fit as mod_tax_rel_lipid, but "flat" for the heatmap
-mod_heatmap_rel <- lm(Log_Lipid_Rel ~ Sample_ID, data = df_clean)
-
-create_significance_heatmap <- function(model, factor_name, title_text) {
-  
-  # 1. Get Pairwise Comparisons
-  # No nesting argument needed here because Sample_ID is now the main effect
-  emm <- emmeans(model, specs = factor_name)
-  pairs_data <- as.data.frame(pairs(emm, adjust = "tukey")) %>%
-    separate(contrast, into = c("Group1", "Group2"), sep = " - ") %>%
-    mutate(
-      Group1 = trimws(Group1),
-      Group2 = trimws(Group2),
-      # Filter out any lingering NAs
-      p_bin = ifelse(!is.na(p.value) & p.value < 0.05, "Significant", "NS"),
-      star = case_when(
-        p.value < 0.001 ~ "***",
-        p.value < 0.01  ~ "**",
-        p.value < 0.05  ~ "*",
-        TRUE ~ ""
-      )
-    ) %>%
-    filter(!is.na(p_bin)) # Remove the "NA" noise
-  
-  # 2. Plot Matrix
-  ggplot(pairs_data, aes(x = Group1, y = Group2, fill = p_bin)) +
-    geom_tile(color = "white") +
-    geom_text(aes(label = star), vjust = 0.7, size = 3) + 
-    scale_fill_manual(values = c("Significant" = "#FF6B6B", "NS" = "grey90"), 
-                      name = "Significance") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 7),
-      axis.text.y = element_text(size = 7),
-      panel.grid = element_blank(),
-      plot.title = element_text(face = "bold", size = 14)
-    ) +
-    labs(title = title_text, 
-         subtitle = "Pairwise family comparisons across all orders",
-         x = "", y = "") +
-    coord_fixed()
-}
-
-# Generate the fixed heatmaps
-p_matrix_mass_fixed <- create_significance_heatmap(mod_heatmap_mass, "Sample_ID", "Mass Significance: Family Comparisons")
-p_matrix_rel_fixed <- create_significance_heatmap(mod_heatmap_rel, "Sample_ID", "Lipid Significance: Family Comparisons")
-
-print(p_matrix_mass_fixed)
-print(p_matrix_rel_fixed)
+# Comparison for Relative Lipid
+compare_performance(mod_rel_tax, mod_rel_func, mod_rel_habitat, rank = TRUE)
 
 
 
-# =========================================================
-# Does size predict lipid content?
-# =========================================================
-mod_allometry <- lm(Log_Lipid_Total ~ Log_Mass, data = df_clean)
-
-print("=== MODEL SUMMARY: DOES SIZE PREDICT FAT? ===")
-summary(mod_allometry)
-
-# 2. VISUALIZE THE RELATIONSHIP
-ggplot(df_clean, aes(x = Log_Mass, y = Log_Lipid_Total)) +
-  
-  # A. The Points (Colored by Order to see if groups differ)
-  geom_point(aes(color = Order), alpha = 0.6, size = 2) +
-  
-  # B. The Regression Line (The "Slope")
-  geom_smooth(method = "lm", color = "black", linetype = "solid") +
-  
-  # C. Identity Line (Slope = 1) for comparison
-  # If the black dashed line is steeper than this gray line, big bugs are "fatter."
-  geom_abline(slope = 1, intercept = coef(mod_allometry)[1], color = "black", linetype = "dashed") +
-  
-  theme_bw() +
-  labs(
-    title = "Allometry of Fat Storage",
-    subtitle = "Black Line = Actual Trend. Dotted = 1:1 Scaling (Isometric).",
-    x = "Insect Size (Log Mass)",
-    y = "Total Lipid Content (Log Mass)",
-    color = "Order"
-  )
-
-# =========================================================
-# Biplot of size vs quality
-# =========================================================
-
-# 1. PREPARE THE DATA 
-df_tradeoff <- df_clean %>%
-  # Add Life_History to the grouping so it stays in the summary
-  group_by(Order, Sample_ID) %>%
-  summarise(
-    Mean_Mass = mean(Mass_Ind, na.rm = TRUE),
-    Mean_Quality = mean(Lipid_Rel_Pct, na.rm = TRUE),
-    Count = n(),
-    .groups = "drop"
-  ) %>%
-  filter(Count >= 2)
-
-# 2. GENERATE THE PLOT
-plot_tradeoff_circles <- ggplot(df_tradeoff, aes(x = Mean_Mass, y = Mean_Quality, color = Order)) +
-  
-  # A. The Grouping Circles (Ellipses)
-  # We use 'stat_ellipse' to draw a circle around the Life History groups
-  # alpha = 0.1 makes the fill very faint so it doesn't hide the points
-  
-  
-  # B. The Points
-  geom_point(size = 4, alpha = 0.9) +
-  
-  # C. The Labels
-  geom_text_repel(aes(label = Sample_ID), 
-                  size = 3, 
-                  box.padding = 0.5, 
-                  max.overlaps = 30,
-                  show.legend = FALSE) +
-  
-  # D. Scales & Colors
-  scale_x_log10() + 
-  
-  # E. Reference Line
-  geom_hline(yintercept = mean(df_clean$Lipid_Rel_Pct, na.rm=TRUE), 
-             linetype = "dashed", color = "grey50") +
-  
-  # F. Formatting
-  theme_bw() +
-  labs(
-    title = "The Trade-off: Quantity vs. Quality (Grouped by Life History)",
-    x = "Quantity: Individual Mass (g) [Log Scale]",
-    y = "Quality: Relative Lipid Content (Proportion)"
-  ) +
-  theme(
-    legend.position = "bottom",
-    axis.title = element_text(face = "bold"),
-    plot.title = element_text(face = "bold")
-  )
-
-# Print
-print(plot_tradeoff_circles)
-
-
-# =========================================================
-# ####Adding predator brackets to the lipid vs weight
-# =========================================================
-# --- 1. SETUP ---
-# Helper to make axes readable (Log -> Grams)
-inv_log_mass <- function(x) { format(exp(x), digits = 2, scientific = FALSE) }
-
-# Bracket Data (Using the "Safe Pair" Staggering)
-diet_brackets <- data.frame(
-  Species = c("E. Small-footed", "Tri-colored", "Little Brown", 
-              "N. Long-eared", "Eastern Red", "Big Brown", 
-              "Hoary Bat", "Nighthawk", "Whip-poor-will"),
-  # X-axis (Natural Log of prey weights)
-  xmin = log(c(0.002, 0.003, 0.005, 0.005, 0.01, 0.02, 0.05, 0.05, 0.1)), 
-  xmax = log(c(0.015, 0.02, 0.04, 0.06, 0.10, 0.12, 0.25, 0.5, 1.0)),
-  
-  # Staggering Levels (1 = Lowest, 5 = Highest)
-  y_level = c(1, 2, 3, 4, 5, 1, 2, 3, 4) 
-)
-
-# Position Calculations (Adapted for Log_Lipid_Total)
-# We find the max Y (Total Lipid) to float the brackets above the data
-max_y_lipid <- max(df_clean$Log_Lipid_Total, na.rm = TRUE)
-
-# Step size needs to be in Log Units now. 
-# 0.5 log units is roughly a 1.6x increase in mass, which is a good gap.
-y_start <- max_y_lipid + 0.2
-step <- 0.4
-tick <- 0.1
-
-diet_brackets$y_bar <- y_start + (diet_brackets$y_level * step)
-
-# --- 2. THE PLOT ---
-ggplot(df_clean, aes(x = Log_Mass, y = Log_Lipid_Total)) +
-  
-  # A. Identity Line (Isometric Scaling)
-  # Note: Ensure 'mod_allometry' is defined in your environment!
-  geom_abline(slope = 1, intercept = coef(mod_allometry)[1], 
-              color = "grey50", linetype = "dotted", size = 0.8) +
-  
-  # B. The Data Points
-  geom_point(aes(fill = Order), shape = 21, color = "black", size = 2.5, stroke = 0.6, alpha = 0.8) +
-  
-  # C. The Regression Line (Actual Trend)
-  geom_smooth(method = "lm", color = "black", linetype = "dashed", se = FALSE) +
-  
-  # D. The Brackets
-  geom_segment(data = diet_brackets, aes(x = xmin, xend = xmax, y = y_bar, yend = y_bar, color = Species), linewidth = 0.7, inherit.aes = FALSE) +
-  geom_segment(data = diet_brackets, aes(x = xmin, xend = xmin, y = y_bar - tick, yend = y_bar + tick, color = Species), linewidth = 0.7, inherit.aes = FALSE) +
-  geom_segment(data = diet_brackets, aes(x = xmax, xend = xmax, y = y_bar - tick, yend = y_bar + tick, color = Species), linewidth = 0.7, inherit.aes = FALSE) +
-  geom_text(data = diet_brackets, aes(x = (xmin + xmax)/2, y = y_bar + 0.15, label = Species, color = Species), fontface = "bold", size = 3, show.legend = FALSE, inherit.aes = FALSE) +
-  
-  # --- SCALES ---
-  # X-Axis: Insect Mass (Grams)
-  scale_x_continuous(labels = inv_log_mass, breaks = log(c(0.002, 0.01, 0.05, 0.2, 1.0))) + 
-  
-  # Y-Axis: Total Lipid Mass (Grams)
-  # We use inv_log_mass here too so the axis shows "0.001", "0.01" etc. instead of -6, -4
-  scale_y_continuous(
-    labels = inv_log_mass,
-    breaks = log(c(0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05)), # Customize these based on your data range
-    limits = c(NA, max(diet_brackets$y_bar) + 0.2)
-  ) +
-  
-  # Colors
-  scale_color_brewer(palette = "Paired", name = "Predator") + 
-  scale_fill_viridis_d(option = "turbo", name = "Insect Order") + 
-  
-  theme_bw() +
-  theme(
-    legend.position = "right",
-    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
-  ) +
-  labs(
-    title = "Allometry of Fat Storage",
-    subtitle = "Are bigger bugs fatter? (Slope > 1 = Hyperallometry)",
-    x = "Insect Mass (grams)",
-    y = "Total Lipid Content (grams)"
-  )
-
-# =========================================================
-# ####Relative lipid by weight
-# =========================================================
-# --- 1. SETUP ---
-# Helper for X-axis labels (converts log mass back to grams)
-inv_log_mass <- function(x) { format(exp(x), digits = 3, scientific = FALSE) }
-
-# --- 2. THE PLOT ---
-ggplot(df_clean, aes(x = Log_Mass, y = Lipid_Rel_Pct)) + 
-  
-  # A. The Data Points
-  # Points are colored by Order to show taxonomic nutritional clustering
-  geom_point(aes(fill = Order), shape = 21, color = "black", size = 3, stroke = 0.6, alpha = 0.8) +
-  
-  # B. The Trend Line
-  # Shows the overall relationship between size and fat content
-  geom_smooth(method = "lm", color = "black", linetype = "solid", linewidth = 1, se = TRUE) +
-  
-  # --- SCALES ---
-  # Y-Axis: Percentage of lipid content
-  scale_y_continuous(
-    labels = scales::percent_format(accuracy = 1), 
-    breaks = seq(0, 1, by = 0.1),
-    expand = expansion(mult = c(0.05, 0.1))
-  ) + 
-  
-  # X-Axis: Readable grams instead of log values
-  scale_x_continuous(
-    labels = inv_log_mass, 
-    breaks = log(c(0.002, 0.01, 0.05, 0.25, 1.0))
-  ) + 
-  
-  # Colors: Using the turbo palette for distinct Order identification
-  scale_fill_viridis_d(option = "turbo", name = "Insect Order") + 
-  
-  # --- THEME & LABELS ---
-  theme_classic() + 
-  theme(
-    legend.position = "right",
-    axis.title = element_text(face = "bold", size = 12),
-    axis.text = element_text(size = 10, color = "black"),
-    plot.title = element_text(face = "bold", size = 14),
-    panel.grid.major = element_line(color = "grey95")
-  ) +
-  labs(
-    title = "Insect Nutritional Quality vs. Body Mass",
-    subtitle = "Analysis of prey availability on Manitoulin Island",
-    x = "Insect Mass (grams)",
-    y = "Relative Lipid Content (%)"
-  )
-
-
-# =========================================================
-# ####Relative lipid by weight with prey backets
-# =========================================================
-# --- 1. SETUP ---
-# Helper for X-axis
-inv_log_mass <- function(x) { format(exp(x), digits = 2, scientific = FALSE) }
-
-# Bracket Data (Optimized to 5 'Safe' Levels)
-diet_brackets <- data.frame(
-  Species = c("E. Small-footed", "Tri-colored", "Little Brown", 
-              "N. Long-eared", "Eastern Red", "Big Brown", 
-              "Hoary Bat", "Nighthawk", "Whip-poor-will"),
-  # X-axis (Natural Log of prey weights)
-  xmin = log(c(0.002, 0.003, 0.005, 0.005, 0.01, 0.02, 0.05, 0.05, 0.1)), 
-  xmax = log(c(0.015, 0.02, 0.04, 0.06, 0.10, 0.12, 0.25, 0.5, 1.0)),
-  
-  # SMART STAGGERING (1 = Lowest, 5 = Highest)
-  # We pair small species (left) with large species (right) to share rows
-  y_level = c(1,  # Small-footed (Ends -4.2) -> Fits with Big Brown
-              2,  # Tri-colored (Ends -3.9) -> Fits with Hoary
-              3,  # Little Brown (Ends -3.2) -> Fits with Nighthawk
-              4,  # N. Long-eared (Ends -2.8) -> Fits with Whip-poor-will
-              5,  # Eastern Red (The "Middle Child" - needs its own row)
-              1,  # Big Brown (Starts -3.9)
-              2,  # Hoary Bat (Starts -3.0)
-              3,  # Nighthawk (Starts -3.0)
-              4)  # Whip-poor-will (Starts -2.3)
-)
-
-# Position Calculations
-# Find the top of your actual data
-max_lipid <- max(df_clean$Lipid_Rel_Pct, na.rm = TRUE)
-
-# Start brackets just 2% above the highest dot
-y_start <- max_lipid + 0.02 
-step <- 0.05   # 5% gap between rows for clear readability
-tick <- 0.015  # 1.5% tall ticks
-
-diet_brackets$y_bar <- y_start + (diet_brackets$y_level * step)
-
-# --- 2. THE PLOT ---
-predator_plot = ggplot(df_clean, aes(x = Log_Mass, y = Lipid_Rel_Pct)) + 
-  
-  # A. The Data Points
-  geom_point(aes(fill = Order), shape = 21, color = "black", size = 2.5, stroke = 0.6, alpha = 0.8) +
-  geom_smooth(method = "lm", color = "grey40", linetype = "dashed", se = FALSE) +
-  
-  # B. The Brackets
-  # Horizontal Bar
-  geom_segment(data = diet_brackets, 
-               aes(x = xmin, xend = xmax, y = y_bar, yend = y_bar, color = Species),
-               linewidth = 0.7, inherit.aes = FALSE) +
-  # Left Tick
-  geom_segment(data = diet_brackets, 
-               aes(x = xmin, xend = xmin, y = y_bar - tick, yend = y_bar + tick, color = Species),
-               linewidth = 0.7, inherit.aes = FALSE) +
-  # Right Tick
-  geom_segment(data = diet_brackets, 
-               aes(x = xmax, xend = xmax, y = y_bar - tick, yend = y_bar + tick, color = Species),
-               linewidth = 0.7, inherit.aes = FALSE) +
-  # Labels
-  geom_text(data = diet_brackets,
-            aes(x = (xmin + xmax)/2, y = y_bar + 0.02, label = Species, color = Species),
-            fontface = "bold", size = 3, show.legend = FALSE, inherit.aes = FALSE) +
-  
-  # --- SCALES ---
-  # Y-Axis: Shows 0%, 10%, 20%... 
-  scale_y_continuous(
-    labels = scales::percent_format(accuracy = 1), 
-    breaks = seq(0, 1, by = 0.1), 
-    limits = c(0, max(diet_brackets$y_bar) + 0.03) # Auto-adjusts to fit top bracket
-  ) + 
-  
-  scale_x_continuous(labels = inv_log_mass, breaks = log(c(0.002, 0.01, 0.05, 0.2, 1.0))) + 
-  
-  # Colors
-  scale_color_brewer(palette = "Paired", name = "Predator") + 
-  scale_fill_viridis_d(option = "turbo", name = "Insect Order") + 
-  
-  theme_classic() + 
-  theme(
-    legend.position = "right",
-    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
-  ) +
-  labs(
-    title = "Insect Nutritional Quality vs. Predator Dietary Scope",
-    subtitle = "Staggered brackets show prey size range for each species",
-    x = "Insect Mass (grams)",
-    y = "Relative Lipid Content (%)"
-  )
-
-# Capture the Relative Lipid Scatter Plot (Clean Version)
-plot_clean_nutrition <- ggplot(df_clean, aes(x = Log_Mass, y = Lipid_Rel_Pct)) + 
-  geom_point(aes(fill = Order), shape = 21, color = "black", size = 3, stroke = 0.6, alpha = 0.8) +
-  geom_smooth(method = "lm", color = "black", linetype = "solid", linewidth = 1, se = TRUE) +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1), breaks = seq(0, 1, by = 0.1)) + 
-  scale_x_continuous(labels = inv_log_mass, breaks = log(c(0.002, 0.01, 0.05, 0.25, 1.0))) + 
-  scale_fill_viridis_d(option = "turbo", name = "Insect Order") + 
-  theme_classic() + 
-  labs(title = "Insect Nutritional Quality vs. Body Mass", x = "Insect Mass (grams)", y = "Relative Lipid Content (%)")
-
-# Capture the Allometry Scatter Plot (Clean Version)
-plot_clean_allometry <- ggplot(df_clean, aes(x = Log_Mass, y = Log_Lipid_Total)) +
-  geom_abline(slope = 1, intercept = coef(mod_allometry)[1], color = "grey60", linetype = "dotted", linewidth = 1) +
-  geom_point(aes(fill = Order), shape = 21, color = "black", size = 3, stroke = 0.6, alpha = 0.8) +
-  geom_smooth(method = "lm", color = "black", linetype = "solid", linewidth = 1.2, se = TRUE) +
-  scale_x_continuous(labels = inv_log_mass, breaks = log(c(0.002, 0.01, 0.05, 0.25, 1.0))) + 
-  scale_y_continuous(labels = inv_log_mass, breaks = log(c(0.0001, 0.001, 0.01, 0.1))) +
-  scale_fill_viridis_d(option = "turbo", name = "Insect Order") + 
+# Boxplot comparing Mouth vs No Mouth for Relative Lipid
+ggplot(df_clean, aes(x = Mouth_Type, y = Log_Lipid_Rel, fill = Mouth_Type)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.4) +
+  scale_fill_manual(values = c("no" = "#D55E00", "yes" = "#0072B2")) +
   theme_classic() +
-  labs(title = "Allometry of Fat Storage", x = "Insect Mass (grams)", y = "Total Lipid Content (grams)")
+  labs(title = "Energy Density by Functional Mouth Type",
+       subtitle = "Capital breeders (no mouth) show higher energy density",
+       x = "Mouthparts Present",
+       y = "Log Relative Lipid Content") +
+  theme(legend.position = "none")
 
-
-
-
-
-#save plots 
-# Define your specific folder name
-output_folder <- "InsectNutrition"
-
-# Create the folder if it doesn't already exist in your working directory
-if (!dir.exists(output_folder)) {
-  dir.create(output_folder)
-}
-
-# Updated list including predator_plot
-export_list <- list(
-  "Taxon_Mass_Nested"     = plot_mass_nested,
-  "Taxon_Lipid_Nested"    = plot_manual_brackets,
-  "Family_Heatmap_Mass"   = p_matrix_mass_fixed,
-  "Family_Heatmap_Lipid"  = p_matrix_rel_fixed,
-  "Nutritional_Scatter"   = plot_clean_nutrition,
-  "Fat_Allometry"         = plot_clean_allometry,
-  "Predator_Diet_Scope"   = predator_plot,     # <--- Added this back in!
-  "Tradeoff_Biplot"       = plot_tradeoff_circles
-)
-
-# Loop and Save to InsectNutrition
-for (name in names(export_list)) {
-  file_path <- file.path("InsectNutrition", paste0(name, ".png"))
-  
-  ggsave(
-    filename = file_path,
-    plot = export_list[[name]],
-    width = 9, 
-    height = 6.5,
-    dpi = 300, # Professional conference quality
-    bg = "white"
-  )
-  
-  message("Successfully exported: ", file_path)
-}
